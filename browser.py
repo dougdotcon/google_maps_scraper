@@ -112,30 +112,45 @@ class BrowserManager:
                 print(f"DEBUG: Fallback Browser encontrado: {binary_path}")
                 chrome_options.binary_location = binary_path
                 
-                # --- FIX CRITICO: Detectar a versão exata do arquivo para baixar o driver correspondente ---
+                # --- FIX CRITICO: Detectar versão ---
+                # A versão do Brave (ex: 143.x) muitas vezes não tem driver correspondente 1:1.
+                # O Chrome Stable atual é ~131. Vamos tentar parear ou forçar um recente.
                 detected_version = BrowserManager.get_file_version_powershell(binary_path)
                 driver_path = None
                 
+                # Lista de versões estáveis conhecidas caso a detecção falhe
+                # Isso evita o erro "Invalid version: latest"
+                FALLBACK_STABLE_VERSION = "131.0.6778.204"
+                
                 if detected_version:
                     print(f"DEBUG: Versão detectada via PowerShell: {detected_version}")
-                    # Tenta baixar a versão exata
                     try:
-                         print(f"DEBUG: Baixando driver para versão {detected_version}...")
+                         # Tenta baixar a versão exata
+                         print(f"DEBUG: Tentando baixar driver correspondente: {detected_version}...")
                          driver_path = ChromeDriverManager(driver_version=detected_version).install()
                     except Exception as ver_err:
-                         print(f"DEBUG: Erro ao baixar versão exata: {ver_err}")
-                         print("DEBUG: Tentando versão 'latest'...")
-                         driver_path = ChromeDriverManager(driver_version="latest").install()
-                else:
-                    print("DEBUG: Não foi possível detectar a versão. Usando 'latest'...")
-                    driver_path = ChromeDriverManager(driver_version="latest").install()
+                         print(f"DEBUG: Versão exata não disponível ({ver_err}).")
+                         print(f"DEBUG: Forçando download da versão estável conhecida: {FALLBACK_STABLE_VERSION}")
+                         try:
+                             driver_path = ChromeDriverManager(driver_version=FALLBACK_STABLE_VERSION).install()
+                         except Exception as e2:
+                             print(f"DEBUG: Falha na versão estável: {e2}")
+                
+                if not driver_path:
+                    print("DEBUG: Tentando última cartada (driver padrão)...")
+                    try:
+                        driver_path = ChromeDriverManager().install()
+                    except:
+                        # Se tudo falhar, tenta usar 'chromedriver' do PATH se existir
+                        driver_path = "chromedriver"
+
             else:
                 # Se não achou binário, tenta genérico
                 print("DEBUG: Binário não encontrado, tentando instalação padrão...")
                 driver_path = ChromeDriverManager().install()
 
             # Corrigir caminho sem .exe se necessário
-            if not driver_path.endswith(".exe"):
+            if driver_path and not driver_path.endswith(".exe") and driver_path != "chromedriver":
                 d = os.path.dirname(driver_path)
                 for root, dirs, files in os.walk(d):
                     if "chromedriver.exe" in files:
@@ -149,6 +164,7 @@ class BrowserManager:
         except Exception as e:
             print("\n" + "="*50)
             print("ERRO FATAL: Não foi possível iniciar Edge nem Chrome/Brave.")
+            print("Sugestão: Verifique se você tem internet para baixar o driver na primeira execução.")
             print(f"Detalhe do erro: {e}")
             print("="*50 + "\n")
             raise e
