@@ -1,9 +1,23 @@
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
+from selenium.common.exceptions import WebDriverException
 from webdriver_manager.chrome import ChromeDriverManager
+import subprocess
+import os
 
 class BrowserManager:
+    @staticmethod
+    def get_file_version_powershell(file_path):
+        try:
+            cmd = f'(Get-Item "{file_path}").VersionInfo.FileVersion'
+            result = subprocess.run(["powershell", "-command", cmd], capture_output=True, text=True)
+            if result.returncode == 0:
+                return result.stdout.strip().split(" ")[0] # Sometimes returns "1.2.3.4 (Build...)"
+        except:
+            pass
+        return None
+
     @staticmethod
     def create_driver(headless=False):
         chrome_options = Options()
@@ -19,7 +33,6 @@ class BrowserManager:
         chrome_options.add_experimental_option('useAutomationExtension', False)
         
         # --- FIX: Explicitly find Chrome/Brave/Opera Binary ---
-        import os
         possible_paths = [
             # Chrome
             r"C:\Program Files\Google\Chrome\Application\chrome.exe",
@@ -31,7 +44,7 @@ class BrowserManager:
             r"C:\Program Files (x86)\BraveSoftware\Brave-Browser\Application\brave.exe",
             os.path.expanduser(r"~\AppData\Local\BraveSoftware\Brave-Browser\Application\brave.exe"),
 
-            # Opera GX / Opera (Pode funcionar com chromedriver dependendo da versao)
+            # Opera GX / Opera
             os.path.expanduser(r"~\AppData\Local\Programs\Opera GX\opera.exe"),
             os.path.expanduser(r"~\AppData\Local\Programs\Opera\opera.exe"),
         ]
@@ -49,13 +62,32 @@ class BrowserManager:
                 print(f"DEBUG: Navegador encontrado ({found_browser_name}): {p}")
                 break
         
+        driver_version = None
         if binary_path:
             chrome_options.binary_location = binary_path
+            # Try to detect version to force valid driver download
+            driver_version = BrowserManager.get_file_version_powershell(binary_path)
+            if driver_version:
+                print(f"DEBUG: Versão detectada do arquivo: {driver_version}")
         else:
             print("WARNING: Nenhum navegador conhecido (Chrome/Brave/Opera) foi encontrado nos locais padrao.")
-        # ------------------------------------------
 
-        path = ChromeDriverManager().install()
+        # Pass detected version to manager, or let it auto-detect if we didn't find binary
+        if driver_version:
+            # webdriver_manager needs proper versioning.
+            # Usually major version is enough for chrome, but brave might report 1.x.
+            # If Brave, we assume it's tracking latest chromium, so we can try to ask for latest or specific.
+            # Actually, Brave executables (chrome.exe/brave.exe) usually report the Chromium version in properties or separate ProductVersion.
+            # Let's try raw version first.
+            try:
+                path = ChromeDriverManager(driver_version=driver_version).install()
+            except:
+                print("DEBUG: Falha ao baixar driver com versão exata. Tentando versão 'latest'...")
+                path = ChromeDriverManager(driver_version="latest").install()
+        else:
+             path = ChromeDriverManager().install()
+             
+        # Workaround for webdriver-manager returning random files instead of exe
         # Workaround for webdriver-manager returning random files instead of exe
         if not path.endswith(".exe"):
             print(f"DEBUG: WebDriverManager returned {path}, searching for exe...")
