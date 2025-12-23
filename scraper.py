@@ -368,32 +368,106 @@ if __name__ == "__main__":
             # Read CSV, forcing phone to be string to avoid float conversion issues
             df = pd.read_csv(csv_filename, dtype={'phone': str})
             
-            # Transform 'phone' column into WhatsApp Hyperlinks
+            # --- NOVA LÓGICA: STATUS SITE ---
+            if 'website' in df.columns:
+                df['STATUS SITE'] = df['website'].apply(
+                    lambda x: '✅ COM SITE' if pd.notna(x) and str(x).strip() != '' else '❌ SEM SITE'
+                )
+
+            # --- NOVA LÓGICA: STATUS SEO ADS ---
+            # Mede eficiência pela quantidade de separadores "|" no nome
+            if 'name' in df.columns:
+                def analyze_seo(name_val):
+                    if pd.isna(name_val): return 0
+                    count = str(name_val).count('|')
+                    if count == 0:
+                        return "Básico"
+                    else:
+                        return f"Otimizado ({count} tags)"
+                
+                df['STATUS SEO ADS'] = df['name'].apply(analyze_seo)
+            
+            # --- LÓGICA: WHATSAPP LINK ---
             if 'phone' in df.columns:
                 def make_whatsapp_link(phone_raw):
                     if pd.isna(phone_raw) or not str(phone_raw).strip():
                         return ""
                     s_phone = str(phone_raw).strip()
-                    # Remove non-digits
                     digits = re.sub(r'\D', '', s_phone)
                     
                     if not digits:
                         return s_phone
                         
-                    # Basic Heuristic for Brazil:
-                    # If 10 or 11 digits and doesn't start with 55, prepend 55
                     target_num = digits
                     if len(digits) in [10, 11] and not digits.startswith('55'):
                          target_num = '55' + digits
                     
                     link = f"https://wa.me/{target_num}"
-                    # Excel Formula: =HYPERLINK("url", "display_text")
                     safe_phone = s_phone.replace('"', '""')
                     return f'=HYPERLINK("{link}", "{safe_phone}")'
 
                 df['phone'] = df['phone'].apply(make_whatsapp_link)
 
-            df.to_excel(xlsx_filename, index=False)
+            # Reordenar colunas para melhor visualização
+            desired_order = ['keyword', 'name', 'STATUS SEO ADS', 'phone', 'address', 'STATUS SITE', 'website', 'link']
+            # Garante que pegamos todas as colunas que existem no DF, na ordem desejada + as sobras
+            existing_cols = [c for c in desired_order if c in df.columns]
+            remaining_cols = [c for c in df.columns if c not in existing_cols]
+            df = df[existing_cols + remaining_cols]
+
+            # Save with formatting (AutoFilter + Column Widths)
+            try:
+                from openpyxl.utils import get_column_letter
+                from openpyxl.styles import Font, PatternFill, Alignment
+                
+                with pd.ExcelWriter(xlsx_filename, engine='openpyxl') as writer:
+                    df.to_excel(writer, index=False, sheet_name='Leads')
+                    worksheet = writer.sheets['Leads']
+                    
+                    # Apply AutoFilter
+                    worksheet.auto_filter.ref = worksheet.dimensions
+                    
+                    # Header Style
+                    header_font = Font(bold=True, color="FFFFFF")
+                    header_fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
+                    
+                    for cell in worksheet[1]:
+                        cell.font = header_font
+                        cell.fill = header_fill
+                        cell.alignment = Alignment(horizontal="center")
+
+                    # Adjust Column Widths
+                    for i, column in enumerate(df.columns, 1):
+                        col_letter = get_column_letter(i)
+                        
+                        # Calculate best width
+                        max_len = 0
+                        
+                        # Check header length
+                        if column:
+                            max_len = len(str(column))
+                        
+                        # Check first 50 rows data length to save time if large
+                        try:
+                            # Convert series to string, handle None
+                            series = df[column].astype(str)
+                            if not series.empty:
+                                data_max = series.map(len).max()
+                                if pd.notna(data_max) and data_max > max_len:
+                                    max_len = data_max
+                        except: pass
+                        
+                        # Limits
+                        adjusted_width = (max_len + 3) * 1.1
+                        if adjusted_width > 60: adjusted_width = 60
+                        if adjusted_width < 12: adjusted_width = 12
+                        
+                        worksheet.column_dimensions[col_letter].width = adjusted_width
+                        
+            except Exception as format_error:
+                print(f"Aviso: Erro na formatação do Excel ({format_error}). Salvando padrão.")
+                df.to_excel(xlsx_filename, index=False)
+
             print(f"Arquivo final salvo: {xlsx_filename}")
             try:
                 os.remove(csv_filename) # Clean up temp csv
