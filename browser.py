@@ -3,6 +3,7 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from selenium.common.exceptions import WebDriverException
 from webdriver_manager.chrome import ChromeDriverManager
+from webdriver_manager.core.utils import ChromeType
 import subprocess
 import os
 
@@ -13,7 +14,7 @@ class BrowserManager:
             cmd = f'(Get-Item "{file_path}").VersionInfo.FileVersion'
             result = subprocess.run(["powershell", "-command", cmd], capture_output=True, text=True)
             if result.returncode == 0:
-                return result.stdout.strip().split(" ")[0] # Sometimes returns "1.2.3.4 (Build...)"
+                return result.stdout.strip().split(" ")[0]
         except:
             pass
         return None
@@ -58,66 +59,79 @@ class BrowserManager:
                 if "brave" in p.lower(): found_browser_name = "Brave"
                 elif "opera" in p.lower(): found_browser_name = "Opera"
                 else: found_browser_name = "Chrome"
-                
-                print(f"DEBUG: Navegador encontrado ({found_browser_name}): {p}")
                 break
         
-        driver_version = None
+        driver_path = None
+        
         if binary_path:
+            print(f"DEBUG: Navegador encontrado ({found_browser_name}): {binary_path}")
             chrome_options.binary_location = binary_path
-            # Try to detect version to force valid driver download
-            driver_version = BrowserManager.get_file_version_powershell(binary_path)
-            if driver_version:
-                print(f"DEBUG: Versão detectada do arquivo: {driver_version}")
-        else:
-            print("WARNING: Nenhum navegador conhecido (Chrome/Brave/Opera) foi encontrado nos locais padrao.")
-
-        # Pass detected version to manager, or let it auto-detect if we didn't find binary
-        if driver_version:
-            # webdriver_manager needs proper versioning.
-            # Usually major version is enough for chrome, but brave might report 1.x.
-            # If Brave, we assume it's tracking latest chromium, so we can try to ask for latest or specific.
-            # Actually, Brave executables (chrome.exe/brave.exe) usually report the Chromium version in properties or separate ProductVersion.
-            # Let's try raw version first.
+            
+            # Logic to install correct driver
             try:
-                path = ChromeDriverManager(driver_version=driver_version).install()
-            except:
-                print("DEBUG: Falha ao baixar driver com versão exata. Tentando versão 'latest'...")
-                path = ChromeDriverManager(driver_version="latest").install()
+                if found_browser_name == "Brave":
+                    # For Brave, try letting webdriver_manager handle it with ChromeType.BRAVE
+                    # Or fallback to generic install which usually picks latest
+                    try:
+                        print("DEBUG: Tentando instalar driver para Brave...")
+                        driver_path = ChromeDriverManager(chrome_type=ChromeType.BRAVE).install()
+                    except:
+                        # Fallback for older webdriver_manager versions or valid errors
+                        driver_path = ChromeDriverManager().install()
+                        
+                elif found_browser_name == "Chrome":
+                    # For Chrome, version match is important
+                    driver_version = BrowserManager.get_file_version_powershell(binary_path)
+                    if driver_version:
+                        print(f"DEBUG: Versão Chrome detectada: {driver_version}")
+                        driver_path = ChromeDriverManager(driver_version=driver_version).install()
+                    else:
+                        driver_path = ChromeDriverManager().install()
+                else:
+                    # Opera/Others
+                    driver_path = ChromeDriverManager().install()
+                    
+            except Exception as e:
+                print(f"DEBUG: Erro na instalação automática do driver: {e}")
+                print("DEBUG: Tentando fallback para versão estável recente (131.0)...")
+                try:
+                    # EMERGENCY FALLBACK: Force a known recent stable version
+                    driver_path = ChromeDriverManager(driver_version="131.0.6778.204").install()
+                except Exception as e2:
+                    print(f"DEBUG: Falha total no driver: {e2}")
         else:
-             path = ChromeDriverManager().install()
-             
-        # Workaround for webdriver-manager returning random files instead of exe
-        # Workaround for webdriver-manager returning random files instead of exe
-        if not path.endswith(".exe"):
-            print(f"DEBUG: WebDriverManager returned {path}, searching for exe...")
-            dir_name = os.path.dirname(path)
+            print("WARNING: Nenhum navegador conhecido encontrado. Tentando instanciar padrão...")
+            try:
+                driver_path = ChromeDriverManager().install()
+            except:
+                pass
+
+        if not driver_path:
+             raise Exception("Não foi possível baixar/encontrar o WebDriver.")
+
+        # Workaround for webdriver-manager issues returning paths without extension
+        if not driver_path.endswith(".exe"):
+            dir_name = os.path.dirname(driver_path)
             candidate = os.path.join(dir_name, "chromedriver.exe")
             if os.path.exists(candidate):
-                path = candidate
+                driver_path = candidate
             else:
-                 # Search recursively in the directory
-                 found = False
+                 # Search recursively
                  for root, dirs, files in os.walk(dir_name):
                      if "chromedriver.exe" in files:
-                         path = os.path.join(root, "chromedriver.exe")
-                         found = True
+                         driver_path = os.path.join(root, "chromedriver.exe")
                          break
-                 if not found:
-                     # Try one level up just in case
-                     for root, dirs, files in os.walk(os.path.dirname(dir_name)):
-                         if "chromedriver.exe" in files:
-                             path = os.path.join(root, "chromedriver.exe")
-                             break
-            print(f"DEBUG: Resolved WebDriver path to: {path}")
 
-        service = Service(path)
+        service = Service(driver_path)
         try:
             driver = webdriver.Chrome(service=service, options=chrome_options)
         except WebDriverException as e:
             if "binary" in str(e).lower():
-                print("ERRO CRITICO: O Selenium nao encontrou o Google Chrome instalado.")
-                print("Solucao: Instale o Google Chrome ou verifique se esta em um local padrao.")
+                print("ERRO CRITICO: Binário do navegador não encontrado pelo Selenium.")
+            print(f"Erro ao iniciar driver: {e}")
+            raise e
+        except Exception as e:
+            print(f"Erro genérico ao abrir navegador: {e}")
             raise e
         
         driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
