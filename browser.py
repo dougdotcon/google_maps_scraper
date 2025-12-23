@@ -1,13 +1,10 @@
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options as ChromeOptions
-from selenium.webdriver.chrome.service import Service as ChromeService
-from webdriver_manager.chrome import ChromeDriverManager
-from webdriver_manager.microsoft import EdgeChromiumDriverManager
-from selenium.webdriver.edge.service import Service as EdgeService
-from selenium.webdriver.edge.options import Options as EdgeOptions
 import subprocess
 import os
 import socket
+import sys
+import time
+import tempfile
+import shutil
 
 class BrowserManager:
     @staticmethod
@@ -18,67 +15,108 @@ class BrowserManager:
         return result == 0
 
     @staticmethod
+    def launch_debug_browser():
+        """
+        Tenta encontrar um navegador instalado e abri-lo em modo de depuração (Porta 9222).
+        Isso permite que o Selenium se conecte a ele sem problemas de versão de driver.
+        """
+        print("DEBUG: Nenhuma instância de navegador aberta detectada.")
+        print("DEBUG: O Python vai tentar abrir um navegador automaticamente...")
+
+        browsers = [
+            # Nome, Executável, Nome do Processo
+            ("Brave", r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe", "brave.exe"),
+            ("Edge x86", r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe", "msedge.exe"),
+            ("Edge x64", r"C:\Program Files\Microsoft\Edge\Application\msedge.exe", "msedge.exe"),
+            ("Chrome", r"C:\Program Files\Google\Chrome\Application\chrome.exe", "chrome.exe"),
+            ("Chrome Local", os.path.expanduser(r"~\AppData\Local\Google\Chrome\Application\chrome.exe"), "chrome.exe"),
+        ]
+
+        selected_browser = None
+        for name, path, proc in browsers:
+            if os.path.exists(path):
+                selected_browser = (name, path, proc)
+                break
+        
+        if not selected_browser:
+            raise Exception("Nenhum navegador (Brave, Edge ou Chrome) encontrado nos locais padrão.")
+
+        name, path, proc_name = selected_browser
+        print(f"DEBUG: Navegador escolhido: {name}")
+
+        # 1. Matar processos antigos para liberar a porta (opcional, mas recomendado)
+        try:
+            subprocess.run(f"taskkill /F /IM {proc_name}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            time.sleep(1)
+        except:
+            pass
+
+        # 2. Criar perfil temporário
+        temp_dir = os.path.join(tempfile.gettempdir(), "selenium_automation_profile")
+        if os.path.exists(temp_dir):
+            try:
+                shutil.rmtree(temp_dir, ignore_errors=True)
+            except:
+                pass
+        os.makedirs(temp_dir, exist_ok=True)
+
+        # 3. Lançar o navegador
+        print(f"DEBUG: Iniciando {name} na porta 9222...")
+        try:
+            # Popen não bloqueia o script
+            subprocess.Popen([
+                path,
+                "--remote-debugging-port=9222",
+                f"--user-data-dir={temp_dir}",
+                "--no-first-run",
+                "--no-default-browser-check"
+            ])
+            # Esperar o navegador subir
+            for i in range(10):
+                if BrowserManager.is_port_open(9222):
+                    print("DEBUG: Porta 9222 aberta! Navegador pronto.")
+                    return True
+                time.sleep(1)
+            
+            print("WARNING: O navegador abriu, mas a porta 9222 não respondeu rápido. Tentando conectar mesmo assim...")
+        except Exception as e:
+            print(f"ERRO ao lançar navegador: {e}")
+            raise e
+
+    @staticmethod
     def create_driver(headless=False):
         driver = None
-        attach_mode = False
         
-        # 1. Verifica se ja existe navegador rodando com debug (Porta 9222)
-        if BrowserManager.is_port_open(9222):
-            print("=========================================================")
-            print("DEBUG: Instância de navegador detectada na porta 9222!")
-            print("DEBUG: O robô vai tentar se conectar ao navegador que já está aberto.")
-            print("=========================================================")
-            attach_mode = True
-        
-        # Configura as opcoes
-        options = ChromeOptions()
-        
-        if attach_mode:
-            options.add_experimental_option("debuggerAddress", "127.0.0.1:9222")
+        # 1. Verifica se ja existe navegador rodando. Se não, abre um.
+        if not BrowserManager.is_port_open(9222):
+            BrowserManager.launch_debug_browser()
         else:
-            # Opções normais para abrir navegador novo
-            if headless:
-                options.add_argument('--headless')
-            options.add_argument('--no-sandbox')
-            options.add_argument('--disable-dev-shm-usage')
-            options.add_argument('--disable-gpu')
-            options.add_argument('--window-size=1920,1080')
-            options.add_argument('--remote-allow-origins=*')
-            options.add_argument('--disable-blink-features=AutomationControlled')
-            options.add_experimental_option("excludeSwitches", ["enable-automation"])
-            options.add_experimental_option('useAutomationExtension', False)
+             print("DEBUG: Navegador já estava aberto na porta 9222. Conectando...")
+        
+        # Configura as opcoes para ANEXAR (Attach)
+        options = ChromeOptions()
+        options.add_experimental_option("debuggerAddress", "127.0.0.1:9222")
 
         # ------------------------------------------------------------------
         # ESTRATEGIA DE DRIVER:
-        # Se estamos anexando (attach_mode), precisamos de QUALQUER driver que fale o protocolo.
-        # Driver 131 (estavel) geralmente funciona bem mesmo com versoes diferentes se for via remote.
-        # Se nao estamos anexando, tentamos achar o driver correto.
         # ------------------------------------------------------------------
-        
         driver_path = None
         
         try:
-             print("DEBUG: Gerenciando WebDriver...")
-             # Tente instalar a versao estavel conhecida (Chrome 131)
-             # Isso e o mais seguro para evitar erros de "latest" ou versoes beta do Brave
+             print("DEBUG: Obtendo WebDriver compatível (Fallback Estável)...")
+             # Como estamos usando DEBUGGER ADDRESS, a versão exata do driver importa menos.
+             # Um driver 131 costuma controlar um Chrome/Brave 143 via CDP sem falhar handshake.
              driver_path = ChromeDriverManager(driver_version="131.0.6778.204").install()
         except Exception as e:
-             print(f"DEBUG: Falha ao baixar driver fixo: {e}")
-             print("DEBUG: Tentando driver 'latest'...")
              try:
                  driver_path = ChromeDriverManager().install()
              except:
-                 pass
-
-        if not driver_path:
-            # Fallback local
-            if os.path.exists("chromedriver.exe"):
-                driver_path = os.path.abspath("chromedriver.exe")
+                 if os.path.exists("chromedriver.exe"):
+                    driver_path = os.path.abspath("chromedriver.exe")
 
         if not driver_path:
              raise Exception("Nao foi possivel baixar o WebDriver.")
 
-        # Garantir que caminho aponta para exe
         if not driver_path.endswith(".exe") and "chromedriver" not in driver_path:
             d = os.path.dirname(driver_path)
             for root, dirs, files in os.walk(d):
@@ -88,24 +126,11 @@ class BrowserManager:
 
         print(f"DEBUG: Usando driver em: {driver_path}")
         
-        # Inicializa o Driver
         try:
             service = ChromeService(driver_path)
             driver = webdriver.Chrome(service=service, options=options)
-            
-            if not attach_mode:
-                # Ocultar automacao
-                try:
-                    driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-                except: pass
-            
             return driver
             
         except Exception as e:
-            print(f"ERRO ao criar driver: {e}")
-            if "binary" in str(e).lower() and not attach_mode:
-                 # Se falhar por causa de binario nao encontrado, tente achar manualmente
-                 # So faz sentido se estiver tentando abrir um novo (nao attach)
-                 print("Tentando localizar binarios manualmente...")
-                 # (Aqui poderia ir a logica antiga de achar binario, mas vamos focar no attach)
+            print(f"ERRO ao conectar ao navegador: {e}")
             raise e

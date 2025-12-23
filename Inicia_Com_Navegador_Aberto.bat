@@ -1,4 +1,5 @@
 @echo off
+setlocal
 TITLE LAUNCHER DEBUG MODE (Brave/Edge/Chrome)
 
 echo ================================================================
@@ -8,34 +9,50 @@ echo ================================================================
 :: ------------------------------------------------------------------
 :: 1. LOCALIZAR A PASTA DO PROJETO
 :: ------------------------------------------------------------------
+
+:: Caso 1: Ja estamos na pasta certa
 if exist "scraper.py" (
-    echo [OK] Executando da pasta correta.
-) else (
-    echo Arquivo scraper.py nao encontrado aqui. Procurando pasta no Desktop...
-    
-    set "TARGET_FOLDER=google_maps_scraper"
-    set "FOUND_PATH="
-
-    :: Opcao A: Desktop Padrao
-    if exist "%USERPROFILE%\Desktop\%TARGET_FOLDER%" set "FOUND_PATH=%USERPROFILE%\Desktop\%TARGET_FOLDER%"
-    
-    :: Opcao B: OneDrive Desktop
-    if exist "%USERPROFILE%\OneDrive\Desktop\%TARGET_FOLDER%" set "FOUND_PATH=%USERPROFILE%\OneDrive\Desktop\%TARGET_FOLDER%"
-    
-    :: Opcao C: OneDrive Desktop (PT-BR)
-    if exist "%USERPROFILE%\OneDrive\Área de Trabalho\%TARGET_FOLDER%" set "FOUND_PATH=%USERPROFILE%\OneDrive\Área de Trabalho\%TARGET_FOLDER%"
-
-    if defined FOUND_PATH (
-        echo [OK] Pasta encontrada em: "%FOUND_PATH%"
-        cd /d "%FOUND_PATH%"
-    ) else (
-        echo.
-        echo [ERRO CRITICO] Nao encontrei a pasta 'google_maps_scraper' e nem o arquivo scraper.py!
-        echo Certifique-se de que a pasta do projeto esta na Area de Trabalho.
-        pause
-        exit /b
-    )
+    echo [OK] Arquivo encontrado no diretorio atual.
+    goto :FOUND
 )
+
+echo Procurando pasta 'google_maps_scraper' no Desktop...
+set "TARGET=google_maps_scraper"
+
+:: Caso 2: Desktop Padrao
+if exist "%USERPROFILE%\Desktop\%TARGET%" (
+    cd /d "%USERPROFILE%\Desktop\%TARGET%"
+    goto :FOUND
+)
+
+:: Caso 3: OneDrive Desktop
+if exist "%USERPROFILE%\OneDrive\Desktop\%TARGET%" (
+    cd /d "%USERPROFILE%\OneDrive\Desktop\%TARGET%"
+    goto :FOUND
+)
+
+:: Caso 4: OneDrive Desktop (PT-BR)
+if exist "%USERPROFILE%\OneDrive\Área de Trabalho\%TARGET%" (
+    cd /d "%USERPROFILE%\OneDrive\Área de Trabalho\%TARGET%"
+    goto :FOUND
+)
+
+:: Se nao achou nada
+echo.
+echo [ERRO CRITICO] Nao encontrei a pasta '%TARGET%'!
+echo.
+echo Onde procurei:
+echo 1. Diretorio atual
+echo 2. %USERPROFILE%\Desktop\%TARGET%
+echo 3. OneDrive...
+echo.
+echo Solucao: Coloque o arquivo .bat DENTRO da pasta do projeto,
+echo ou certifique-se que a pasta esta na Area de Trabalho.
+pause
+exit /b
+
+:FOUND
+echo [OK] Pasta de execucao definida: %CD%
 
 echo.
 echo Este script vai:
@@ -47,15 +64,15 @@ echo Pressione qualquer tecla para continuar...
 pause >nul
 
 :: ------------------------------------------------------------------
-:: 2. PREPARAR AMBIENTE
+:: 2. PREPARAR AMBIENTE E ABRIR NAVEGADOR
 :: ------------------------------------------------------------------
 
-:: Matar processos existentes (Opcional, mas recomendado para liberar porta)
+:: Matar processos para liberar a porta 9222
 taskkill /F /IM chrome.exe >nul 2>&1
 taskkill /F /IM brave.exe >nul 2>&1
 taskkill /F /IM msedge.exe >nul 2>&1
 
-:: Definir pasta de perfil temporario para nao bagunicar o seu pessoal
+:: Pasta de perfil temporario
 set "USER_DIR=%TEMP%\selenium_debug_profile"
 rmdir /S /Q "%USER_DIR%" >nul 2>&1
 mkdir "%USER_DIR%"
@@ -63,51 +80,54 @@ mkdir "%USER_DIR%"
 echo.
 echo === TENTANDO ABRIR NAVEGADOR ===
 
-:: Tenta achar Brave
+:: Prioridade 1: Brave
 if exist "C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe" (
     echo [Brave] Iniciando Brave...
     start "" "C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe" --remote-debugging-port=9222 --user-data-dir="%USER_DIR%"
-    goto LAUNCH_PYTHON
+    goto :LAUNCH_PYTHON
 )
 
-:: Tenta achar Edge
+:: Prioridade 2: Edge (x86)
 if exist "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" (
     echo [Edge] Iniciando Edge...
     start "" "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" --remote-debugging-port=9222 --user-data-dir="%USER_DIR%"
-    goto LAUNCH_PYTHON
+    goto :LAUNCH_PYTHON
 )
+
+:: Prioridade 3: Edge (x64)
 if exist "C:\Program Files\Microsoft\Edge\Application\msedge.exe" (
     echo [Edge] Iniciando Edge...
     start "" "C:\Program Files\Microsoft\Edge\Application\msedge.exe" --remote-debugging-port=9222 --user-data-dir="%USER_DIR%"
-    goto LAUNCH_PYTHON
+    goto :LAUNCH_PYTHON
 )
 
-:: Tenta achar Chrome
+:: Prioridade 4: Chrome
 if exist "C:\Program Files\Google\Chrome\Application\chrome.exe" (
     echo [Chrome] Iniciando Chrome...
     start "" "C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222 --user-data-dir="%USER_DIR%"
-    goto LAUNCH_PYTHON
+    goto :LAUNCH_PYTHON
 )
 
-echo [ERRO] Nenhum navegador encontrado nas pastas padrao!
+echo [ERRO] Nenhum executavel de navegador encontrado!
 pause
 exit /b
 
 :LAUNCH_PYTHON
 echo.
-echo Navegador iniciado! Aguardando 5 segundos...
+echo Navegador iniciado! Aguardando 5 segundos para carregar...
 timeout /t 5 >nul
 
 echo.
 echo === INICIANDO ROBO ===
-echo Diretorio atual: %CD%
+echo Executando de: %CD%
+
 python scraper.py
 
 if %errorlevel% neq 0 (
     echo.
-    echo Ocorreu um erro na execucao do Python.
+    echo O programa fechou com erro ou foi cancelado.
 )
 
 echo.
-echo Fim da execucao.
+echo Pressione qualquer tecla para sair.
 pause
