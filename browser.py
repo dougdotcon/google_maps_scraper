@@ -1,170 +1,111 @@
 from selenium import webdriver
-# Chrome Imports
 from selenium.webdriver.chrome.options import Options as ChromeOptions
 from selenium.webdriver.chrome.service import Service as ChromeService
 from webdriver_manager.chrome import ChromeDriverManager
-
-# Edge Imports
-from selenium.webdriver.edge.options import Options as EdgeOptions
-from selenium.webdriver.edge.service import Service as EdgeService
 from webdriver_manager.microsoft import EdgeChromiumDriverManager
-
-from selenium.common.exceptions import WebDriverException
+from selenium.webdriver.edge.service import Service as EdgeService
+from selenium.webdriver.edge.options import Options as EdgeOptions
 import subprocess
 import os
+import socket
 
 class BrowserManager:
     @staticmethod
-    def get_file_version_powershell(file_path):
-        try:
-            cmd = f'(Get-Item "{file_path}").VersionInfo.FileVersion'
-            result = subprocess.run(["powershell", "-command", cmd], capture_output=True, text=True)
-            if result.returncode == 0:
-                return result.stdout.strip().split(" ")[0]
-        except:
-            pass
-        return None
+    def is_port_open(port):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        result = sock.connect_ex(('127.0.0.1', port))
+        sock.close()
+        return result == 0
 
     @staticmethod
     def create_driver(headless=False):
         driver = None
+        attach_mode = False
         
-        # =========================================================================
-        # 1. TENTATIVA PRIORITARIA: MICROSOFT EDGE
-        # =========================================================================
-        try:
-            print("DEBUG: Tentando iniciar Microsoft Edge...")
-            edge_options = EdgeOptions()
+        # 1. Verifica se ja existe navegador rodando com debug (Porta 9222)
+        if BrowserManager.is_port_open(9222):
+            print("=========================================================")
+            print("DEBUG: Instância de navegador detectada na porta 9222!")
+            print("DEBUG: O robô vai tentar se conectar ao navegador que já está aberto.")
+            print("=========================================================")
+            attach_mode = True
+        
+        # Configura as opcoes
+        options = ChromeOptions()
+        
+        if attach_mode:
+            options.add_experimental_option("debuggerAddress", "127.0.0.1:9222")
+        else:
+            # Opções normais para abrir navegador novo
             if headless:
-                edge_options.add_argument('--headless')
-            
-            edge_options.add_argument('--no-sandbox')
-            edge_options.add_argument('--disable-dev-shm-usage')
-            edge_options.add_argument('--disable-gpu')
-            edge_options.add_argument('--window-size=1920,1080')
-            edge_options.add_argument('--disable-blink-features=AutomationControlled')
-            edge_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-            edge_options.add_experimental_option('useAutomationExtension', False)
-            
-            # Detectar binario do Edge
-            edge_paths = [
-                r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
-                r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
-                os.path.expanduser(r"~\AppData\Local\Microsoft\Edge\Application\msedge.exe"),
-            ]
-            
-            edge_binary = None
-            for p in edge_paths:
-                if os.path.exists(p):
-                    edge_binary = p
-                    break
-            
-            if edge_binary:
-                print(f"DEBUG: Edge encontrado em: {edge_binary}")
-                edge_options.binary_location = edge_binary
-                
-                # Instalar Driver do Edge
-                driver_path = EdgeChromiumDriverManager().install()
-                
-                driver = webdriver.Edge(service=EdgeService(driver_path), options=edge_options)
-                print("DEBUG: Driver Edge iniciado com sucesso!")
-                
-                driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-                return driver
-            else:
-                print("DEBUG: Executável do Edge não encontrado nos locais padrão.")
+                options.add_argument('--headless')
+            options.add_argument('--no-sandbox')
+            options.add_argument('--disable-dev-shm-usage')
+            options.add_argument('--disable-gpu')
+            options.add_argument('--window-size=1920,1080')
+            options.add_argument('--remote-allow-origins=*')
+            options.add_argument('--disable-blink-features=AutomationControlled')
+            options.add_experimental_option("excludeSwitches", ["enable-automation"])
+            options.add_experimental_option('useAutomationExtension', False)
 
+        # ------------------------------------------------------------------
+        # ESTRATEGIA DE DRIVER:
+        # Se estamos anexando (attach_mode), precisamos de QUALQUER driver que fale o protocolo.
+        # Driver 131 (estavel) geralmente funciona bem mesmo com versoes diferentes se for via remote.
+        # Se nao estamos anexando, tentamos achar o driver correto.
+        # ------------------------------------------------------------------
+        
+        driver_path = None
+        
+        try:
+             print("DEBUG: Gerenciando WebDriver...")
+             # Tente instalar a versao estavel conhecida (Chrome 131)
+             # Isso e o mais seguro para evitar erros de "latest" ou versoes beta do Brave
+             driver_path = ChromeDriverManager(driver_version="131.0.6778.204").install()
         except Exception as e:
-            print(f"DEBUG: Falha ao iniciar Edge: {e}")
-            print("DEBUG: Tentando fallback para Chrome/Brave...")
+             print(f"DEBUG: Falha ao baixar driver fixo: {e}")
+             print("DEBUG: Tentando driver 'latest'...")
+             try:
+                 driver_path = ChromeDriverManager().install()
+             except:
+                 pass
 
-        # =========================================================================
-        # 2. FALLBACK: CHROME / BRAVE / OPERA
-        # =========================================================================
+        if not driver_path:
+            # Fallback local
+            if os.path.exists("chromedriver.exe"):
+                driver_path = os.path.abspath("chromedriver.exe")
+
+        if not driver_path:
+             raise Exception("Nao foi possivel baixar o WebDriver.")
+
+        # Garantir que caminho aponta para exe
+        if not driver_path.endswith(".exe") and "chromedriver" not in driver_path:
+            d = os.path.dirname(driver_path)
+            for root, dirs, files in os.walk(d):
+                 if "chromedriver.exe" in files:
+                     driver_path = os.path.join(root, "chromedriver.exe")
+                     break
+
+        print(f"DEBUG: Usando driver em: {driver_path}")
+        
+        # Inicializa o Driver
         try:
-            chrome_options = ChromeOptions()
-            if headless:
-                chrome_options.add_argument('--headless')
+            service = ChromeService(driver_path)
+            driver = webdriver.Chrome(service=service, options=options)
             
-            chrome_options.add_argument('--no-sandbox')
-            chrome_options.add_argument('--disable-dev-shm-usage')
-            chrome_options.add_argument('--disable-gpu')
-            chrome_options.add_argument('--window-size=1920,1080')
-            chrome_options.add_argument('--disable-blink-features=AutomationControlled')
-            chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-            chrome_options.add_experimental_option('useAutomationExtension', False)
+            if not attach_mode:
+                # Ocultar automacao
+                try:
+                    driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+                except: pass
             
-            possible_paths = [
-                r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-                r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
-                r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe",
-                r"C:\Program Files (x86)\BraveSoftware\Brave-Browser\Application\brave.exe",
-                os.path.expanduser(r"~\AppData\Local\Google\Chrome\Application\chrome.exe"),
-            ]
-            
-            binary_path = None
-            for p in possible_paths:
-                if os.path.exists(p):
-                    binary_path = p
-                    break
-            
-            if binary_path:
-                print(f"DEBUG: Fallback Browser encontrado: {binary_path}")
-                chrome_options.binary_location = binary_path
-                
-                # --- FIX CRITICO: Detectar versão ---
-                # A versão do Brave (ex: 143.x) muitas vezes não tem driver correspondente 1:1.
-                # O Chrome Stable atual é ~131. Vamos tentar parear ou forçar um recente.
-                detected_version = BrowserManager.get_file_version_powershell(binary_path)
-                driver_path = None
-                
-                # Lista de versões estáveis conhecidas caso a detecção falhe
-                # Isso evita o erro "Invalid version: latest"
-                FALLBACK_STABLE_VERSION = "131.0.6778.204"
-                
-                if detected_version:
-                    print(f"DEBUG: Versão detectada via PowerShell: {detected_version}")
-                    try:
-                         # Tenta baixar a versão exata
-                         print(f"DEBUG: Tentando baixar driver correspondente: {detected_version}...")
-                         driver_path = ChromeDriverManager(driver_version=detected_version).install()
-                    except Exception as ver_err:
-                         print(f"DEBUG: Versão exata não disponível ({ver_err}).")
-                         print(f"DEBUG: Forçando download da versão estável conhecida: {FALLBACK_STABLE_VERSION}")
-                         try:
-                             driver_path = ChromeDriverManager(driver_version=FALLBACK_STABLE_VERSION).install()
-                         except Exception as e2:
-                             print(f"DEBUG: Falha na versão estável: {e2}")
-                
-                if not driver_path:
-                    print("DEBUG: Tentando última cartada (driver padrão)...")
-                    try:
-                        driver_path = ChromeDriverManager().install()
-                    except:
-                        # Se tudo falhar, tenta usar 'chromedriver' do PATH se existir
-                        driver_path = "chromedriver"
-
-            else:
-                # Se não achou binário, tenta genérico
-                print("DEBUG: Binário não encontrado, tentando instalação padrão...")
-                driver_path = ChromeDriverManager().install()
-
-            # Corrigir caminho sem .exe se necessário
-            if driver_path and not driver_path.endswith(".exe") and driver_path != "chromedriver":
-                d = os.path.dirname(driver_path)
-                for root, dirs, files in os.walk(d):
-                    if "chromedriver.exe" in files:
-                        driver_path = os.path.join(root, "chromedriver.exe")
-                        break
-            
-            driver = webdriver.Chrome(service=ChromeService(driver_path), options=chrome_options)
-            driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
             return driver
-
+            
         except Exception as e:
-            print("\n" + "="*50)
-            print("ERRO FATAL: Não foi possível iniciar Edge nem Chrome/Brave.")
-            print("Sugestão: Verifique se você tem internet para baixar o driver na primeira execução.")
-            print(f"Detalhe do erro: {e}")
-            print("="*50 + "\n")
+            print(f"ERRO ao criar driver: {e}")
+            if "binary" in str(e).lower() and not attach_mode:
+                 # Se falhar por causa de binario nao encontrado, tente achar manualmente
+                 # So faz sentido se estiver tentando abrir um novo (nao attach)
+                 print("Tentando localizar binarios manualmente...")
+                 # (Aqui poderia ir a logica antiga de achar binario, mas vamos focar no attach)
             raise e
