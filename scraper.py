@@ -8,6 +8,9 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException, WebDriverException
 from browser import BrowserManager
+import tkinter as tk
+from tkinter import ttk, messagebox
+import sys
 
 class GoogleMapsScraper:
     def __init__(self, headless=False):
@@ -251,21 +254,138 @@ class GoogleMapsScraper:
             except:
                 pass
 
-if __name__ == "__main__":
-    scraper = GoogleMapsScraper(headless=False)
+def get_user_config():
+    """
+    Launch a Tkinter GUI to get search configuration from the user.
+    Returns a dictionary with the configuration or None if cancelled.
+    """
+    config = {}
     
-    target_address = "Avenida Embaixador Abelardo Bueno, 3401 – Barra Olímpica – Rio de Janeiro, RJ"
-    
-    if scraper.search_location(target_address):
-        scraper.search_nearby("empresas")
-        leads = scraper.extract_leads(max_leads=200) # User asked for 'all', but lets start with limit
-        
-        # Save to Excel
-        if leads:
-            df = pd.DataFrame(leads)
-            df.to_excel("empresas_rock_in_rio.xlsx", index=False)
-            print(f"Saved {len(leads)} leads to empresas_rock_in_rio.xlsx")
-        else:
-            print("No leads found.")
+    def on_submit():
+        config['address'] = address_entry.get().strip()
+        config['keywords'] = [k.strip() for k in keywords_entry.get().split(',') if k.strip()]
+        try:
+            config['max_leads'] = int(max_leads_entry.get().strip())
+        except ValueError:
+            messagebox.showerror("Erro", "O número de leads deve ser um valor inteiro.")
+            return
             
-    scraper.close()
+        config['headless'] = headless_var.get()
+        
+        if not config['address']:
+            messagebox.showerror("Erro", "A localização é obrigatória.")
+            return
+        if not config['keywords']:
+            messagebox.showerror("Erro", "Pelo menos uma palavra-chave deve ser informada.")
+            return
+            
+        root.destroy()
+
+    def on_cancel():
+        config.clear()
+        root.destroy()
+        sys.exit()
+
+    root = tk.Tk()
+    root.title("Configuração do Scraper Google Maps")
+    root.geometry("500x350")
+    
+    # Styles
+    style = ttk.Style()
+    style.configure('TLabel', font=('Arial', 10))
+    style.configure('TButton', font=('Arial', 10))
+    
+    # Padding
+    frame = ttk.Frame(root, padding="20")
+    frame.pack(fill=tk.BOTH, expand=True)
+
+    # Address
+    ttk.Label(frame, text="Localização Alvo (Endereço Completo):").pack(anchor=tk.W, pady=(0, 5))
+    address_entry = ttk.Entry(frame, width=50)
+    address_entry.insert(0, "Avenida Embaixador Abelardo Bueno, 3401 – Barra Olímpica – Rio de Janeiro, RJ")
+    address_entry.pack(fill=tk.X, pady=(0, 15))
+
+    # Keywords / Niches
+    ttk.Label(frame, text="Termos de Busca / Nichos / Profissões (separados por vírgula):").pack(anchor=tk.W, pady=(0, 5))
+    ttk.Label(frame, text="Exemplo: restaurantes, dentistas, academias", font=('Arial', 8, 'italic'), foreground='gray').pack(anchor=tk.W, pady=(0, 5))
+    keywords_entry = ttk.Entry(frame, width=50)
+    keywords_entry.insert(0, "empresas, marketing, consultoria")
+    keywords_entry.pack(fill=tk.X, pady=(0, 15))
+
+    # Max Leads
+    ttk.Label(frame, text="Máximo de Leads (por termo):").pack(anchor=tk.W, pady=(0, 5))
+    max_leads_entry = ttk.Entry(frame, width=20)
+    max_leads_entry.insert(0, "50")
+    max_leads_entry.pack(anchor=tk.W, pady=(0, 15))
+    
+    # Headless
+    headless_var = tk.BooleanVar(value=False)
+    headless_check = ttk.Checkbutton(frame, text="Modo Oculto (Headless)", variable=headless_var)
+    headless_check.pack(anchor=tk.W, pady=(0, 20))
+
+    # Buttons
+    btn_frame = ttk.Frame(frame)
+    btn_frame.pack(fill=tk.X)
+    
+    submit_btn = ttk.Button(btn_frame, text="Iniciar Busca", command=on_submit)
+    submit_btn.pack(side=tk.RIGHT, padx=5)
+    
+    cancel_btn = ttk.Button(btn_frame, text="Cancelar", command=on_cancel)
+    cancel_btn.pack(side=tk.RIGHT, padx=5)
+    
+    # Lift window to top
+    root.lift()
+    root.attributes('-topmost',True)
+    root.after_idle(root.attributes,'-topmost',False)
+    
+    root.mainloop()
+    
+    return config
+
+if __name__ == "__main__":
+    # Get configuration from GUI
+    config = get_user_config()
+    
+    if not config:
+        print("Busca cancelada pelo usuário.")
+        sys.exit()
+        
+    print(f"Iniciando scraper com configuração: {config}")
+
+    scraper = GoogleMapsScraper(headless=config['headless'])
+    
+    target_address = config['address']
+    
+    try:
+        if scraper.search_location(target_address):
+            all_leads = []
+            
+            for keyword in config['keywords']:
+                print(f"\n--- Iniciando busca para o termo: {keyword} ---")
+                scraper.search_nearby(keyword)
+                leads = scraper.extract_leads(max_leads=config['max_leads'])
+                
+                # Add a metadata field for the source keyword
+                for lead in leads:
+                    lead['keyword'] = keyword
+                    
+                all_leads.extend(leads)
+                
+            # Save to Excel
+            if all_leads:
+                # Create filename based on first keyword or timestamp
+                sanitized_key = re.sub(r'[^a-zA-Z0-9]', '_', config['keywords'][0])
+                filename = f"leads_{sanitized_key}_{int(time.time())}.xlsx"
+                
+                df = pd.DataFrame(all_leads)
+                df.to_excel(filename, index=False)
+                print(f"Salvo {len(all_leads)} leads em {filename}")
+                messagebox.showinfo("Concluído", f"Busca finalizada! {len(all_leads)} leads salvos em {filename}")
+            else:
+                print("Nenhum lead encontrado.")
+                messagebox.showwarning("Aviso", "Nenhum lead encontrado para os termos pesquisados.")
+    except Exception as e:
+        print(f"Erro fatal: {e}")
+        messagebox.showerror("Erro", f"Ocorreu um erro durante a execução: {e}")
+    finally:
+        scraper.close()
