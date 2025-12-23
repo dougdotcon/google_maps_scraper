@@ -18,25 +18,41 @@ class BrowserManager:
         chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
         chrome_options.add_experimental_option('useAutomationExtension', False)
         
-        # --- FIX: Explicitly find Chrome Binary ---
+        # --- FIX: Explicitly find Chrome/Brave/Opera Binary ---
         import os
         possible_paths = [
+            # Chrome
             r"C:\Program Files\Google\Chrome\Application\chrome.exe",
             r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
             os.path.expanduser(r"~\AppData\Local\Google\Chrome\Application\chrome.exe"),
+            
+            # Brave
+            r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe",
+            r"C:\Program Files (x86)\BraveSoftware\Brave-Browser\Application\brave.exe",
+            os.path.expanduser(r"~\AppData\Local\BraveSoftware\Brave-Browser\Application\brave.exe"),
+
+            # Opera GX / Opera (Pode funcionar com chromedriver dependendo da versao)
+            os.path.expanduser(r"~\AppData\Local\Programs\Opera GX\opera.exe"),
+            os.path.expanduser(r"~\AppData\Local\Programs\Opera\opera.exe"),
         ]
         
         binary_path = None
+        found_browser_name = "Unknown"
+        
         for p in possible_paths:
             if os.path.exists(p):
                 binary_path = p
-                print(f"DEBUG: Chrome binary found at: {p}")
+                if "brave" in p.lower(): found_browser_name = "Brave"
+                elif "opera" in p.lower(): found_browser_name = "Opera"
+                else: found_browser_name = "Chrome"
+                
+                print(f"DEBUG: Navegador encontrado ({found_browser_name}): {p}")
                 break
         
         if binary_path:
             chrome_options.binary_location = binary_path
         else:
-            print("WARNING: Chrome binary not found in standard paths. Selenium will try auto-detect.")
+            print("WARNING: Nenhum navegador conhecido (Chrome/Brave/Opera) foi encontrado nos locais padrao.")
         # ------------------------------------------
 
         path = ChromeDriverManager().install()
