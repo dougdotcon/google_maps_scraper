@@ -1,55 +1,83 @@
 @echo off
+TITLE Google Maps Scraper Launcher
 :: ==============================================================
-:: LAUNCHER PARA AREA DE TRABALHO (PC DO RAFAEL)
-:: Copie este arquivo para o Desktop. Ele vai buscar a pasta automaticamente.
+:: LAUNCHER UNIVERSAL (FUNCIONA EM QUALQUER USUARIO)
 :: ==============================================================
 
-:: Caminho fixo onde a pasta do projeto esta salva na outra maquina
-set "PROJECT_DIR=C:\Users\Rafae\Desktop\google_maps_scraper"
-
-:: Verifica se a pasta existe
-if not exist "%PROJECT_DIR%" (
-    echo [ERRO] A pasta do projeto nao foi encontrada!
-    echo.
-    echo O sistema buscou em: "%PROJECT_DIR%"
-    echo.
-    echo Certifique-se de que a pasta 'google_maps_scraper' existe na Area de Trabalho e contem os arquivos.
-    echo Se voce mudou o nome da pasta, edite este arquivo .bat (clique direito -> Editar) e ajuste o caminho.
-    pause
-    exit /b
-)
-
-:: Entra na pasta do projeto
-cd /d "%PROJECT_DIR%"
-
-echo ==========================================
-echo      Iniciando Scraper (Modo Desktop)
-echo ==========================================
-echo Diretorio de execucao: %CD%
+echo Iniciando diagnostic...
+echo Usuario atual: %USERNAME%
 echo.
 
-:: Verifica se o Python esta instalado
-python --version >nul 2>&1
-if %errorlevel% neq 0 (
-    echo [ERRO] Python nao encontrado!
-    echo Instale o Python (marque 'Add to PATH' durante a instalacao).
+:: 1. Tenta descobrir o caminho do Desktop automaticamente
+set "TARGET_FOLDER=google_maps_scraper"
+
+:: Opcao A: Desktop Padrao
+set "PATH_A=%USERPROFILE%\Desktop\%TARGET_FOLDER%"
+
+:: Opcao B: Desktop OneDrive (Comum no Windows 11)
+set "PATH_B=%USERPROFILE%\OneDrive\Desktop\%TARGET_FOLDER%"
+
+:: Opcao C: Desktop OneDrive (Pt-Br)
+set "PATH_C=%USERPROFILE%\OneDrive\Área de Trabalho\%TARGET_FOLDER%"
+
+:: Tenta localizar
+if exist "%PATH_A%" (
+    set "FINAL_PATH=%PATH_A%"
+    echo [OK] Pasta encontrada no Desktop padrao.
+) else if exist "%PATH_B%" (
+    set "FINAL_PATH=%PATH_B%"
+    echo [OK] Pasta encontrada no OneDrive Desktop.
+) else if exist "%PATH_C%" (
+    set "FINAL_PATH=%PATH_C%"
+    echo [OK] Pasta encontrada no OneDrive Desktop (PT-BR).
+) else (
+    echo [ERRO CRITICO] Nao consegui encontrar a pasta '%TARGET_FOLDER%'.
+    echo.
+    echo Procuramos em:
+    echo 1. %PATH_A%
+    echo 2. %PATH_B%
+    echo 3. %PATH_C%
+    echo.
+    echo Por favor, certifique-se de que a pasta se chama EXATAMENTE 'google_maps_scraper'
+    echo e esta na Area de Trabalho.
+    echo.
     pause
     exit /b
 )
 
-:: (Opcional) Instala dependencias silenciosamente na primeira vez se falhar start
-:: python -c "import selenium" >nul 2>&1
-:: if %errorlevel% neq 0 (
-::    echo Instalando dependencias iniciais...
-::    pip install -r requirements.txt
-:: )
+:: 2. Entra na pasta
+cd /d "%FINAL_PATH%"
 
-:: Executa o script principal
-python scraper.py
+:: 3. Verifica Python
+echo Verificando Python...
+python --version >nul 2>&1
+if %errorlevel% neq 0 (
+    echo 'python' comando nao encontrado. Tentando 'py'...
+    py --version >nul 2>&1
+    if %errorlevel% neq 0 (
+        echo [ERRO] Python nao instalado ou nao esta no PATH.
+        echo Baixe em python.org
+        pause
+        exit /b
+    ) else (
+        set "PYTHON_CMD=py"
+    )
+) else (
+    set "PYTHON_CMD=python"
+)
+
+:: 4. Executa
+echo.
+echo === Executando Scraper em: %FINAL_PATH% ===
+echo.
+
+%PYTHON_CMD% scraper.py
 
 if %errorlevel% neq 0 (
     echo.
-    echo Ocorreu um erro ao rodar o script.
+    echo [ERRO] O programa fechou com erro.
 )
 
+echo.
+echo Pressione qualquer tecla para sair...
 pause
