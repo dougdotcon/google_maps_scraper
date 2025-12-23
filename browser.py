@@ -69,7 +69,6 @@ class BrowserManager:
                 driver = webdriver.Edge(service=EdgeService(driver_path), options=edge_options)
                 print("DEBUG: Driver Edge iniciado com sucesso!")
                 
-                # Mascarar automação
                 driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
                 return driver
             else:
@@ -112,17 +111,28 @@ class BrowserManager:
             if binary_path:
                 print(f"DEBUG: Fallback Browser encontrado: {binary_path}")
                 chrome_options.binary_location = binary_path
-            
-            # Tentar instalação genérica que resolve a maioria dos casos de Chrome/Brave
-            try:
-                if binary_path and "brave" in binary_path.lower():
-                     print("DEBUG: Tentando driver para Brave ('brave')...")
-                     # Passando string direta para evitar ImportError
-                     driver_path = ChromeDriverManager(chrome_type='brave').install()
+                
+                # --- FIX CRITICO: Detectar a versão exata do arquivo para baixar o driver correspondente ---
+                detected_version = BrowserManager.get_file_version_powershell(binary_path)
+                driver_path = None
+                
+                if detected_version:
+                    print(f"DEBUG: Versão detectada via PowerShell: {detected_version}")
+                    # Tenta baixar a versão exata
+                    try:
+                         print(f"DEBUG: Baixando driver para versão {detected_version}...")
+                         driver_path = ChromeDriverManager(driver_version=detected_version).install()
+                    except Exception as ver_err:
+                         print(f"DEBUG: Erro ao baixar versão exata: {ver_err}")
+                         print("DEBUG: Tentando versão 'latest'...")
+                         driver_path = ChromeDriverManager(driver_version="latest").install()
                 else:
-                     driver_path = ChromeDriverManager().install()
-            except:
-                 driver_path = ChromeDriverManager().install()
+                    print("DEBUG: Não foi possível detectar a versão. Usando 'latest'...")
+                    driver_path = ChromeDriverManager(driver_version="latest").install()
+            else:
+                # Se não achou binário, tenta genérico
+                print("DEBUG: Binário não encontrado, tentando instalação padrão...")
+                driver_path = ChromeDriverManager().install()
 
             # Corrigir caminho sem .exe se necessário
             if not driver_path.endswith(".exe"):
