@@ -5,6 +5,10 @@ import sys
 import time
 import tempfile
 import shutil
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options as ChromeOptions
+from selenium.webdriver.chrome.service import Service as ChromeService
+from webdriver_manager.chrome import ChromeDriverManager
 
 class BrowserManager:
     @staticmethod
