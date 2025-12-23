@@ -3,7 +3,6 @@ from selenium import webdriver
 from selenium.webdriver.chrome.options import Options as ChromeOptions
 from selenium.webdriver.chrome.service import Service as ChromeService
 from webdriver_manager.chrome import ChromeDriverManager
-from webdriver_manager.core.utils import ChromeType
 
 # Edge Imports
 from selenium.webdriver.edge.options import Options as EdgeOptions
@@ -51,6 +50,7 @@ class BrowserManager:
             edge_paths = [
                 r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
                 r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+                os.path.expanduser(r"~\AppData\Local\Microsoft\Edge\Application\msedge.exe"),
             ]
             
             edge_binary = None
@@ -116,8 +116,9 @@ class BrowserManager:
             # Tentar instalação genérica que resolve a maioria dos casos de Chrome/Brave
             try:
                 if binary_path and "brave" in binary_path.lower():
-                     print("DEBUG: Tentando driver para Brave...")
-                     driver_path = ChromeDriverManager(chrome_type=ChromeType.BRAVE).install()
+                     print("DEBUG: Tentando driver para Brave ('brave')...")
+                     # Passando string direta para evitar ImportError
+                     driver_path = ChromeDriverManager(chrome_type='brave').install()
                 else:
                      driver_path = ChromeDriverManager().install()
             except:
